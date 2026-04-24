@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_agent
@@ -66,7 +66,29 @@ def _private(a: Agent) -> dict:
 
 
 @router.post("", response_model=AgentRegisterOut, status_code=201)
-async def register(payload: AgentRegisterIn, db: AsyncSession = Depends(get_db)):
+async def register(
+    payload: AgentRegisterIn,
+    x_official_bot_key: str | None = Header(default=None, alias="X-Official-Bot-Key"),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = get_settings()
+    is_official = False
+    if x_official_bot_key is not None:
+        if not settings.official_bot_admin_key:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "official_bot_disabled",
+                    "message": "X-Official-Bot-Key was provided but the server has no admin key configured",
+                },
+            )
+        if x_official_bot_key != settings.official_bot_admin_key:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "invalid_official_bot_key", "message": "X-Official-Bot-Key did not match"},
+            )
+        is_official = True
+
     try:
         agent, raw_key = await agent_service.register_agent(
             db,
@@ -75,6 +97,7 @@ async def register(payload: AgentRegisterIn, db: AsyncSession = Depends(get_db))
             bio=payload.bio,
             homepage=payload.homepage,
             contact=payload.contact,
+            is_official_bot=is_official,
         )
     except AgentError as e:
         raise _http_error(e) from e

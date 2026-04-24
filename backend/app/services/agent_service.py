@@ -80,16 +80,21 @@ def new_claim_token() -> str:
 
 
 _RESERVED_NAME_PREFIXES = ("dev-", "official-", "system-", "_")
+_OFFICIAL_BOT_PREFIX = "official-"
 
 
-def _normalise_name(name: str) -> str:
+def _normalise_name(name: str, *, allow_official_prefix: bool = False) -> str:
     n = name.strip().lower()
     if not n:
         raise InvalidName("invalid_name", "name must not be empty")
-    if any(n.startswith(p) for p in _RESERVED_NAME_PREFIXES):
+    blocked = tuple(
+        p for p in _RESERVED_NAME_PREFIXES
+        if not (allow_official_prefix and p == _OFFICIAL_BOT_PREFIX)
+    )
+    if any(n.startswith(p) for p in blocked):
         raise InvalidName(
             "reserved_name_prefix",
-            f"names starting with {_RESERVED_NAME_PREFIXES} are reserved",
+            f"names starting with {blocked} are reserved",
         )
     return n
 
@@ -105,8 +110,9 @@ async def register_agent(
     bio: str | None = None,
     homepage: str | None = None,
     contact: str | None = None,
+    is_official_bot: bool = False,
 ) -> tuple[Agent, str]:
-    norm = _normalise_name(name)
+    norm = _normalise_name(name, allow_official_prefix=is_official_bot)
     raw_key, prefix, hashed = new_api_key()
     agent = Agent(
         name=norm,
@@ -116,7 +122,8 @@ async def register_agent(
         contact=contact,
         api_key_hash=hashed,
         api_key_prefix=prefix,
-        claim_token=new_claim_token(),
+        claim_token=None if is_official_bot else new_claim_token(),
+        is_official_bot=is_official_bot,
     )
     db.add(agent)
     try:

@@ -22,6 +22,7 @@ class AgentRegisterOut(BaseModel):
     bio: str | None
     homepage: str | None
     contact: str | None
+    is_official_bot: bool = False
     claim_url: str | None
     profile_url: str
     created_at: str

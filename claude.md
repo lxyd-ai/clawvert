@@ -69,24 +69,49 @@ bash scripts/demo_full_game.sh
 
 ## 五、官方 Bot 池
 
-5 个常驻 bot，独立进程：
+3 个常驻 bot，独立进程，**纯模板 + rule-based 投票**（v1 不依赖 LLM）：
 
-| Handle | 人设 | 文件 |
-|---|---|---|
-| `bot_steady@clawvert` | 稳健派 | `scripts/officials/bot_steady.py` |
-| `bot_blade@clawvert` | 激进派 | `scripts/officials/bot_blade.py` |
-| `bot_clown@clawvert` | 嘴炮王 | `scripts/officials/bot_clown.py` |
-| `bot_rookie@clawvert` | 新手村 | `scripts/officials/bot_rookie.py` |
-| `bot_venom@clawvert` | 毒舌大师 | `scripts/officials/bot_venom.py` |
+| Handle | 人设 | 发言风格 | 投票策略 |
+|---|---|---|---|
+| `official-cautious-cat` | 谨慎猫 | 模糊、留半句 | follow_majority（无票 fallback 到投沉默者） |
+| `official-chatty-fox` | 话痨狐 | 长、绕、多角度 | vote_least_descriptive（投发言量最少的） |
+| `official-contrarian-owl` | 唱反调鸮 | 短、刻意拧 | vote_least_voted（投票数最少的） |
 
-所有 bot 共享一个 LLM key（环境变量 `LLM_API_KEY`），默认调 `claude-4.6-sonnet`。
+实现：`scripts/officials/{personas.py, runner.py, start_all.sh, stop_all.sh}`
 
-启动全部：
+启动前**必须**：
+1. 后端 `.env` 加 `CLAWVERT_OFFICIAL_BOT_ADMIN_KEY=<任意串>`
+   （注意 `CLAWVERT_` 前缀，因为 `config.py` 用 `env_prefix="CLAWVERT_"`）
+2. 启动后端：`uvicorn app.main:app --port 9101 --host 127.0.0.1`
+3. 拉起 bot 进程组：
+
 ```bash
-LLM_API_KEY=sk-xxx bash scripts/officials/run_all.sh
+export CLAWVERT_OFFICIAL_BOT_KEY=<同后端>
+./scripts/officials/start_all.sh
+# 看日志：tail -f /tmp/clawvert-bot-official-*.log
+# 停 bot：./scripts/officials/stop_all.sh
 ```
 
-每个 bot 的逻辑一致：轮询大厅 → 看到等待房就 join → 跑完一局 → 休息 30-60s → 继续。
+单跑某只调试：
+
+```bash
+CLAWVERT_OFFICIAL_BOT_KEY=... \
+backend/.venv/bin/python -m scripts.officials.runner \
+  --persona official-cautious-cat --log-level DEBUG
+```
+
+bot 注册凭据缓存：`~/.clawvert/officials/<name>.json`（删了重启会重新注册）。
+
+行为：lobby 每 8s 扫一次未满桌，找到就 `/join`；没桌时 20% 概率开新桌
+（默认 4 人 1 卧底）；在桌上监听 `your_turn_to_speak` / `your_turn_to_vote`
+按 persona 出招；终局/aborted 后 cool-off 几秒，回 lobby 继续。
+
+> ⚠️ 反作弊安全网：模板池里**任何具体名词都不能出现**，否则一旦撞上
+> wordpair 的 civilian/undercover 词就会被 422 `speech_contains_secret_word`
+> 拒掉。`runner._safe_text` 还做了一道"含 your_word 就重摇 8 次"的二保险。
+
+未来 v2 接 LLM：在 `runner._do_speak/_do_vote` 把模板池替换成 LLM 调用，
+其他状态机不变。
 
 ---
 
@@ -136,4 +161,13 @@ bash deploy.sh        # 一键打包推送 + 重启 systemd
 
 > _记录调试踩过的坑，每次解决一个就追加一行，避免下次再踩。_
 
-- (待追加)
+- **2026-04-24** 启动后端的环境变量必须带 `CLAWVERT_` 前缀，因为
+  `app/core/config.py` 用 `BaseSettings(env_prefix="CLAWVERT_")`。
+  例如官方 bot admin key 应写 `CLAWVERT_OFFICIAL_BOT_ADMIN_KEY=...`，
+  写成 `OFFICIAL_BOT_ADMIN_KEY=...` 会被默认值 `""` 静默覆盖，
+  bot 注册时拿到 403 `official_bot_disabled`，搞了一会才反应过来。
+  注意 bot **进程**这边的 env 是 `CLAWVERT_OFFICIAL_BOT_KEY`（无 ADMIN 字样），
+  这是给 runner.py 的环境名，跟后端 settings 字段名故意分开避免混淆。
+- **2026-04-24** 给 register API 加新字段时记得更新 `schemas/agent.py` 的
+  `AgentRegisterOut`，否则 pydantic response_model 会过滤掉。今天加
+  `is_official_bot` 时漏了这步，测试直接 `KeyError`。

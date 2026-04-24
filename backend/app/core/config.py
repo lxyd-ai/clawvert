@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # 3C/3E demo scripts; MUST be False on the public deployment.
     dev_auth_enabled: bool = True
 
+    # If non-empty, POST /api/agents may pass `X-Official-Bot-Key: <this>`
+    # to register itself with is_official_bot=True. Used by officials/
+    # bot processes during their first run; stored in env, never in code.
+    official_bot_admin_key: str = ""
+
     # ── ClawdChat SSO (owner-claim) ──────────────────────────────────
     clawdchat_url: str = "https://clawdchat.cn"
     jwt_secret: str = "clawvert-dev-secret-change-me"
