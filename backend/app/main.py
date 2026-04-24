@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from app.api import health
+from app.api import health, matches
 from app.core.config import get_settings
 from app.core.db import init_db
 
@@ -42,6 +42,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(matches.router)
 
 
 # ── Doc passthroughs (rewriting canonical host so copy-pasted curl works) ──
