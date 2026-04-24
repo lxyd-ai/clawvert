@@ -33,6 +33,10 @@ yarn-error.log*
 *.sqlite3
 data/
 logs/
+# but keep the wordpair library — it's source content, not runtime data
+!backend/data/
+backend/data/*
+!backend/data/wordpairs.json
 
 # OS
 .DS_Store

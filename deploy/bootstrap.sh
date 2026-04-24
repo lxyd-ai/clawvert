@@ -25,9 +25,15 @@
 # (gitignored) which this script sources if present.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -f "$REPO_ROOT/.env.deploy" ]; then
-  set -a; . "$REPO_ROOT/.env.deploy"; set +a
+# When piped over SSH (`bash -s`), BASH_SOURCE is unset / the cwd may be
+# random; only resolve REPO_ROOT and source .env.deploy when we have a real
+# script path on disk. The SSH path passes everything explicitly via the
+# preamble built below, so the remote side doesn't need .env.deploy.
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [ -f "$REPO_ROOT/.env.deploy" ]; then
+    set -a; . "$REPO_ROOT/.env.deploy"; set +a
+  fi
 fi
 
 GITHUB_REPO="${GITHUB_REPO:-https://github.com/lxyd-ai/clawvert.git}"
@@ -45,17 +51,33 @@ BOT_PERSONAS="${BOT_PERSONAS:-official-cautious-cat official-chatty-fox official
 # ── If running locally, SSH to remote ─────────────────────────────────────────
 if [[ -n "${PROD_HOST:-}" ]]; then
   echo "==> Bootstrapping remote $PROD_HOST via SSH"
-  SSHPASS_CMD=""
+
+  # Build the env preamble explicitly, single-quoting each value with proper
+  # escape so shells that contain spaces / quotes (BOT_PERSONAS!) survive.
+  # Avoids the previous `eval` trap that tokenised "a b c" into 3 commands.
+  shellquote() {
+    # POSIX-portable single-quoting: 'foo' → 'foo', "a'b" → 'a'\''b'
+    printf "'%s'" "${1//\'/\'\\\'\'}"
+  }
+  preamble=""
+  for var in GITHUB_REPO REMOTE_DIR DATA_DIR DOMAIN_PRIMARY DOMAIN_ALIAS \
+             API_PORT WEB_PORT CLAWDCHAT_URL JWT_SECRET OFFICIAL_BOT_KEY \
+             BOT_PERSONAS; do
+    val="${!var-}"
+    preamble+="export $var=$(shellquote "$val")"$'\n'
+  done
+
   if [[ -n "${PROD_PASSWORD:-}" ]]; then
-    SSHPASS_CMD="sshpass -p '$PROD_PASSWORD'"
+    if ! command -v sshpass >/dev/null 2>&1; then
+      echo "ERROR: sshpass not installed; brew install sshpass" >&2
+      exit 1
+    fi
+    SSH=(sshpass -p "$PROD_PASSWORD" ssh -o StrictHostKeyChecking=no "root@$PROD_HOST" "bash -s")
+  else
+    SSH=(ssh -o StrictHostKeyChecking=no "root@$PROD_HOST" "bash -s")
   fi
-  eval "$SSHPASS_CMD ssh -o StrictHostKeyChecking=no root@$PROD_HOST" \
-    "GITHUB_REPO='$GITHUB_REPO' REMOTE_DIR='$REMOTE_DIR' DATA_DIR='$DATA_DIR' \
-     DOMAIN_PRIMARY='$DOMAIN_PRIMARY' DOMAIN_ALIAS='$DOMAIN_ALIAS' \
-     API_PORT='$API_PORT' WEB_PORT='$WEB_PORT' \
-     CLAWDCHAT_URL='$CLAWDCHAT_URL' JWT_SECRET='$JWT_SECRET' \
-     OFFICIAL_BOT_KEY='$OFFICIAL_BOT_KEY' BOT_PERSONAS='$BOT_PERSONAS' \
-     bash -s" < "${BASH_SOURCE[0]}"
+
+  { printf '%s' "$preamble"; cat "${BASH_SOURCE[0]}"; } | "${SSH[@]}"
   echo "==> Remote bootstrap complete."
   exit 0
 fi
@@ -74,9 +96,13 @@ if ! id clawvert &>/dev/null; then
 fi
 
 echo "==> [3/9] Clone repository"
+# git complains about "dubious ownership" when root touches a clawvert-owned
+# repo (post-chown re-runs). Whitelist explicitly so re-bootstrap is idempotent.
+git config --global --add safe.directory "$REMOTE_DIR" 2>/dev/null || true
 if [[ -d "$REMOTE_DIR/.git" ]]; then
   echo "    repo already exists, pulling latest"
-  git -C "$REMOTE_DIR" pull --ff-only
+  sudo -u clawvert git -C "$REMOTE_DIR" pull --ff-only \
+    || git -C "$REMOTE_DIR" pull --ff-only   # fallback if dir isn't yet chowned
 else
   mkdir -p "$(dirname "$REMOTE_DIR")"
   git clone "$GITHUB_REPO" "$REMOTE_DIR"
@@ -87,8 +113,11 @@ mkdir -p "$DATA_DIR/officials" /var/log/clawvert /var/backups/clawvert
 chown -R clawvert:clawvert "$REMOTE_DIR" "$DATA_DIR" /var/log/clawvert /var/backups/clawvert
 
 echo "==> [5/9] Python venv + install backend"
+# Create venv as the clawvert user too — otherwise root owns it and the
+# subsequent `sudo -u clawvert pip install` hits Permission denied on
+# site-packages (the original lesson from clawmoku 2026-04-22).
 if [[ ! -d "$REMOTE_DIR/backend/.venv" ]]; then
-  python3 -m venv "$REMOTE_DIR/backend/.venv"
+  sudo -u clawvert python3 -m venv "$REMOTE_DIR/backend/.venv"
 fi
 sudo -u clawvert "$REMOTE_DIR/backend/.venv/bin/pip" install -e "$REMOTE_DIR/backend" --quiet
 
