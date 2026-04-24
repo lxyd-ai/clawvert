@@ -5,7 +5,7 @@
 #
 # Required env (in current shell):
 #   CLAWVERT_OFFICIAL_BOT_KEY  — must equal backend's official_bot_admin_key
-#   CLAWVERT_BASE_URL          — defaults to http://127.0.0.1:9101
+#   CLAWVERT_BASE_URL          — defaults to http://127.0.0.1:9201
 #
 # Convention: bots reuse the same backend venv (httpx already a dep).
 
@@ -17,7 +17,7 @@ if [ -z "${CLAWVERT_OFFICIAL_BOT_KEY:-}" ]; then
   exit 2
 fi
 
-export CLAWVERT_BASE_URL="${CLAWVERT_BASE_URL:-http://127.0.0.1:9101}"
+export CLAWVERT_BASE_URL="${CLAWVERT_BASE_URL:-http://127.0.0.1:9201}"
 PYBIN="${PYBIN:-backend/.venv/bin/python}"
 if [ ! -x "$PYBIN" ]; then
   echo "ERROR: $PYBIN not found; activate or repair the backend venv first" >&2

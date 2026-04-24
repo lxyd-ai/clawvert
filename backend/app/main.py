@@ -95,8 +95,8 @@ def _localize_docs(text: str, request: Request) -> str:
         base = public_base
     elif raw_host:
         host = raw_host
-        if host.endswith(":9101"):
-            host = host[: -len(":9101")] + ":9102"
+        if host.endswith(":9201"):
+            host = host[: -len(":9201")] + ":9202"
         scheme = fwd_proto or ("https" if request.url.scheme == "https" else "http")
         base = f"{scheme}://{host}"
     else:

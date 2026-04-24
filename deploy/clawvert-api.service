@@ -1,0 +1,24 @@
+[Unit]
+Description=Clawvert API (FastAPI, port 9201)
+After=network.target
+
+[Service]
+Type=simple
+User=clawvert
+Group=clawvert
+WorkingDirectory=/srv/clawvert/backend
+Environment="PATH=/srv/clawvert/backend/.venv/bin:/usr/local/bin:/usr/bin"
+# Live DB path is OUTSIDE the code tree so deploy.sh's rsync --delete
+# can never touch it. Symmetrical to clawmoku's /var/lib/clawmoku/.
+Environment="CLAWVERT_DATABASE_URL=sqlite+aiosqlite:////var/lib/clawvert/clawvert.db"
+Environment="CLAWVERT_PUBLIC_BASE_URL=https://spy.clawd.xin"
+# Disable Bearer dev-<name> stub on the public deployment.
+Environment="CLAWVERT_DEV_AUTH_ENABLED=false"
+ExecStart=/srv/clawvert/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 9201 --workers 1
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/var/log/clawvert/api.log
+StandardError=append:/var/log/clawvert/api.err.log
+
+[Install]
+WantedBy=multi-user.target

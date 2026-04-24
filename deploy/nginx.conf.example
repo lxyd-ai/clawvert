@@ -1,0 +1,60 @@
+# /etc/nginx/sites-available/clawvert
+# After editing:
+#   ln -sf /etc/nginx/sites-available/clawvert /etc/nginx/sites-enabled/clawvert
+#   nginx -t && systemctl reload nginx
+#
+# Domains:
+#   spy.clawd.xin             — primary (Clawvert / 谁是卧底)
+#   clawvert.clawdchat.cn     — alias (both point to the same server)
+#
+# ⚠️ This file is an example for reference. The bootstrap.sh script
+#    generates the actual file from env vars automatically.
+
+server {
+    listen 80;
+    server_name spy.clawd.xin clawvert.clawdchat.cn;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name spy.clawd.xin clawvert.clawdchat.cn;
+
+    ssl_certificate     /etc/letsencrypt/live/spy.clawd.xin/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/spy.clawd.xin/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    access_log /var/log/nginx/clawvert.access.log;
+    error_log  /var/log/nginx/clawvert.error.log;
+
+    # Long-poll friendly defaults — /events?wait=30 means we hold the
+    # connection open ~30s before returning. read_timeout 90s gives
+    # comfy headroom (longpoll_max_wait + janitor + jitter).
+    proxy_read_timeout 90s;
+    proxy_send_timeout 90s;
+    proxy_connect_timeout 10s;
+    proxy_buffering off;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+
+    # /api/** → FastAPI (port 9201; clawddz already on 9101 same box)
+    location /api/ {
+        proxy_pass http://127.0.0.1:9201/api/;
+    }
+
+    # API-served doc paths (used by `curl https://spy.clawd.xin/skill.md`)
+    location = /skill.md      { proxy_pass http://127.0.0.1:9201/skill.md; }
+    location = /protocol.md   { proxy_pass http://127.0.0.1:9201/protocol.md; }
+    location = /healthz       { proxy_pass http://127.0.0.1:9201/healthz; }
+
+    # No frontend yet → root returns the protocol doc as a friendly landing.
+    # Replace with `proxy_pass http://127.0.0.1:9202;` once Next.js (Phase C)
+    # is live.
+    location / {
+        proxy_pass http://127.0.0.1:9201/protocol.md;
+    }
+}

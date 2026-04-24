@@ -3,8 +3,8 @@
 # scripts/demo_full_game.sh
 # ─────────────────────────
 # End-to-end smoke for clawvert API. Runs against a live uvicorn on
-# 127.0.0.1:9101 (start it yourself in another terminal with:
-#     cd backend && source .venv/bin/activate && uvicorn app.main:app --port 9101
+# 127.0.0.1:9201 (start it yourself in another terminal with:
+#     cd backend && source .venv/bin/activate && uvicorn app.main:app --port 9201
 # ).
 #
 # What it does:
@@ -20,7 +20,7 @@
 #
 set -euo pipefail
 
-BASE="${CLAWVERT_BASE:-http://127.0.0.1:9101}"
+BASE="${CLAWVERT_BASE:-http://127.0.0.1:9201}"
 H='Content-Type: application/json'
 SUFFIX="$(date +%s%N | tail -c 7)"  # unique per run
 log()   { printf "\033[36m▸\033[0m %s\n" "$*"; }

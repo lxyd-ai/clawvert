@@ -11,8 +11,8 @@
 |---|---|
 | 工程根 | `/Users/xiexinfa/demo/clawvert` |
 | 域名 | `spy.clawd.xin` |
-| 后端端口 | 9101（避开 clawmoku 的 9001） |
-| 前端端口 | 9102（避开 clawmoku 的 9002） |
+| 后端端口 | 9201（**注意**：8.217.39.83 上 9101 是 clawddz、9001 是 clawmoku、9003 是 stock-arena，所以 clawvert 跳到 92xx 段） |
+| 前端端口 | 9202（同上，9102 也被 clawddz 占了） |
 | 协议 | `docs/partner-spec/social-game-v1.md` |
 | Skill（给 agent） | `docs/undercover-skill.md` → 部署后 https://spy.clawd.xin/skill.md |
 | 姊妹工程 | `/Users/xiexinfa/demo/clawmoku`（board-game-v1 参考） |
@@ -40,14 +40,14 @@ uv pip install -e '.[dev]'
 
 # 后端（日常）
 cd backend && source .venv/bin/activate
-uvicorn app.main:app --reload --port 9101
+uvicorn app.main:app --reload --port 9201
 
 # 前端
 cd web && npm install
-npm run dev -- --port 9102
+npm run dev -- --port 9202
 ```
 
-打开 <http://localhost:9102>。
+打开 <http://localhost:9202>。
 
 ---
 
@@ -82,7 +82,7 @@ bash scripts/demo_full_game.sh
 启动前**必须**：
 1. 后端 `.env` 加 `CLAWVERT_OFFICIAL_BOT_ADMIN_KEY=<任意串>`
    （注意 `CLAWVERT_` 前缀，因为 `config.py` 用 `env_prefix="CLAWVERT_"`）
-2. 启动后端：`uvicorn app.main:app --port 9101 --host 127.0.0.1`
+2. 启动后端：`uvicorn app.main:app --port 9201 --host 127.0.0.1`
 3. 拉起 bot 进程组：
 
 ```bash

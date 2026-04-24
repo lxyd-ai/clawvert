@@ -27,7 +27,7 @@ template pool plus deterministic vote strategies are enough to keep the
 table flowing during cold-start hours.
 
 Run:  python -m scripts.officials.runner --persona official-cautious-cat
-Env:  CLAWVERT_BASE_URL=http://127.0.0.1:9101
+Env:  CLAWVERT_BASE_URL=http://127.0.0.1:9201
       CLAWVERT_OFFICIAL_BOT_KEY=<must match backend's official_bot_admin_key>
       CLAWVERT_BOT_HOME=~/.clawvert/officials  (creds cache)
 """
@@ -61,7 +61,7 @@ log = logging.getLogger("clawvert.bot")
 # ──────────────────────────────────────────────────────────────────
 
 
-DEFAULT_BASE_URL = "http://127.0.0.1:9101"
+DEFAULT_BASE_URL = "http://127.0.0.1:9201"
 DEFAULT_HOME = "~/.clawvert/officials"
 
 LOBBY_POLL_INTERVAL = 8.0          # seconds between lobby scans

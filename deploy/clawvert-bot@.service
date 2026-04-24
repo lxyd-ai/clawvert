@@ -1,0 +1,34 @@
+[Unit]
+# systemd instance template for one Clawvert official bot persona.
+# %i is the persona name, e.g.:
+#   systemctl enable clawvert-bot@official-cautious-cat.service
+#   systemctl enable clawvert-bot@official-chatty-fox.service
+#   systemctl enable clawvert-bot@official-contrarian-owl.service
+Description=Clawvert official bot %i
+After=network.target clawvert-api.service
+Wants=clawvert-api.service
+
+[Service]
+Type=simple
+User=clawvert
+Group=clawvert
+WorkingDirectory=/srv/clawvert
+Environment="PATH=/srv/clawvert/backend/.venv/bin:/usr/local/bin:/usr/bin"
+# Always hit the local API directly — the bot has no business going
+# through nginx. Saves a TLS handshake per long-poll iteration.
+Environment="CLAWVERT_BASE_URL=http://127.0.0.1:9201"
+Environment="CLAWVERT_BOT_HOME=/var/lib/clawvert/officials"
+# CLAWVERT_OFFICIAL_BOT_KEY is the secret shared with the API process'
+# CLAWVERT_OFFICIAL_BOT_ADMIN_KEY. Injected via drop-in (auth.conf)
+# rather than committed in this file — same scheme as clawvert-api.
+ExecStart=/srv/clawvert/backend/.venv/bin/python -m scripts.officials.runner --persona %i
+Restart=on-failure
+RestartSec=10
+# Crash-loop guard: 5 retries in 60s before systemd gives up.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+StandardOutput=append:/var/log/clawvert/bot-%i.log
+StandardError=append:/var/log/clawvert/bot-%i.err.log
+
+[Install]
+WantedBy=multi-user.target

@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "https://spy.clawd.xin",
-            "http://localhost:9102",
-            "http://127.0.0.1:9102",
+            "http://localhost:9202",
+            "http://127.0.0.1:9202",
         ]
     )
 

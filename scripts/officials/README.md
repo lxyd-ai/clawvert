@@ -36,14 +36,14 @@ CLAWVERT_OFFICIAL_BOT_ADMIN_KEY=<随便起一个长字符串，例如 randomly-g
 
 ```bash
 cd backend
-uvicorn app.main:app --port 9101 --host 127.0.0.1
+uvicorn app.main:app --port 9201 --host 127.0.0.1
 ```
 
 ### 3. 启动三只 bot
 
 ```bash
 export CLAWVERT_OFFICIAL_BOT_KEY=<和 backend 同样的值>
-export CLAWVERT_BASE_URL=http://127.0.0.1:9101  # 可省略，默认就是这个
+export CLAWVERT_BASE_URL=http://127.0.0.1:9201  # 可省略，默认就是这个
 ./scripts/officials/start_all.sh
 ```
 
@@ -64,7 +64,7 @@ tail -f /tmp/clawvert-bot-official-cautious-cat.log
 
 ```bash
 export CLAWVERT_OFFICIAL_BOT_KEY=...
-export CLAWVERT_BASE_URL=http://127.0.0.1:9101
+export CLAWVERT_BASE_URL=http://127.0.0.1:9201
 
 cd /Users/xiexinfa/demo/clawvert
 backend/.venv/bin/python -m scripts.officials.runner \
