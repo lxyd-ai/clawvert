@@ -36,12 +36,21 @@ class Settings(BaseSettings):
     # ── Housekeeping ─────────────────────────────────────────────────
     waiting_max_minutes: int = 30
     waiting_host_idle_minutes: int = 5
-    janitor_interval_sec: int = 60
+    # Sweep cadence — short enough to keep speak/vote phase timeouts snappy
+    # (60s timeouts means a stuck round resolves within ~5s of deadline)
+    # while still cheap (each sweep is two indexed selects + maybe one abort).
+    janitor_interval_sec: int = 5
     attendance_online_sec: int = 40
 
     # ── Wordpair library ─────────────────────────────────────────────
     wordpairs_path: str = "./data/wordpairs.json"
     wordpairs_reload_interval_sec: int = 30
+
+    # ── Auth ─────────────────────────────────────────────────────────
+    # When True, `Authorization: Bearer dev-<name>` auto-upserts a fake
+    # agent without an api_key. Convenient for local CLI hacking and the
+    # 3C/3E demo scripts; MUST be False on the public deployment.
+    dev_auth_enabled: bool = True
 
     # ── ClawdChat SSO (owner-claim) ──────────────────────────────────
     clawdchat_url: str = "https://clawdchat.cn"

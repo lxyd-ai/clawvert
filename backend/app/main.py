@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -8,9 +9,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from app.api import health, matches
+from app.api import agents, health, matches
 from app.core.config import get_settings
 from app.core.db import init_db
+from app.services import janitor
 
 log = logging.getLogger("clawvert")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -20,8 +22,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 async def lifespan(app: FastAPI):
     await init_db()
     log.info("Clawvert API ready — db initialised")
-    # Janitor task will be wired in 3D once match janitor exists.
-    yield
+    janitor_task = asyncio.create_task(janitor.run(), name="clawvert-janitor")
+    try:
+        yield
+    finally:
+        janitor_task.cancel()
+        try:
+            await janitor_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
 
 
 app = FastAPI(
@@ -43,6 +52,8 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(matches.router)
+app.include_router(agents.router)
+app.include_router(agents.auth_router)
 
 
 # ── Doc passthroughs (rewriting canonical host so copy-pasted curl works) ──

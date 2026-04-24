@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +27,7 @@ from app.api.deps import optional_agent
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models.agent import Agent
-from app.models.match import MatchEvent
+from app.models.match import MatchEvent, MatchPlayer
 from app.schemas.common import ErrorResp
 from app.schemas.match import (
     ActionIn,
@@ -41,7 +41,7 @@ from app.schemas.match import (
     SnapshotOut,
 )
 from app.services import event_bus, match_service
-from app.services.match_service import MatchError
+from app.services.match_service import MatchError, hash_token
 from app.services.views import (
     event_visible,
     project_event,
@@ -66,10 +66,13 @@ def _resolve_caller_owner(agent: Agent | None) -> str | None:
 async def _load_seat_for_caller(
     db: AsyncSession, match_id: str, agent: Agent | None
 ) -> int | None:
-    """Find which seat (if any) the bearer-authenticated agent occupies."""
+    """Find which seat (if any) the bearer-authenticated agent occupies.
+
+    Used by GET endpoints (snapshot/events) where a Bearer alone is enough
+    to know "are you a player or just a viewer".
+    """
     if agent is None:
         return None
-    from app.models.match import MatchPlayer
     res = await db.execute(
         select(MatchPlayer.seat).where(
             MatchPlayer.match_id == match_id,
@@ -78,6 +81,51 @@ async def _load_seat_for_caller(
     )
     row = res.first()
     return int(row[0]) if row else None
+
+
+async def _require_seat(
+    db: AsyncSession,
+    match_id: str,
+    agent: Agent | None,
+    play_token: str | None,
+) -> int:
+    """Enforced seat lookup for write endpoints: action / abort / resign.
+
+    Rules (per §1.2.5 / §7.1):
+        - Bearer api_key required (agent != None).
+        - X-Play-Token (or body.play_token) required.
+        - The token's sha256 hash must match the seat the bearer agent
+          occupies in this match — owners can't reuse another agent's
+          token to dance into a seat.
+    """
+    if agent is None:
+        raise HTTPException(status_code=401, detail={
+            "error": "auth_required",
+            "message": "Bearer api_key required for this action",
+        })
+    if not play_token:
+        raise HTTPException(status_code=401, detail={
+            "error": "play_token_required",
+            "message": "X-Play-Token header (or body.play_token) is required",
+        })
+    res = await db.execute(
+        select(MatchPlayer.seat, MatchPlayer.play_token_hash)
+        .where(MatchPlayer.match_id == match_id,
+               MatchPlayer.agent_id == agent.id)
+    )
+    row = res.first()
+    if row is None:
+        raise HTTPException(status_code=403, detail={
+            "error": "agent_not_in_match",
+            "message": "your agent does not hold a seat in this match",
+        })
+    seat, token_hash = int(row[0]), row[1]
+    if hash_token(play_token) != token_hash:
+        raise HTTPException(status_code=403, detail={
+            "error": "play_token_mismatch",
+            "message": "play_token does not match your seat in this match",
+        })
+    return seat
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -189,17 +237,10 @@ async def action_endpoint(
     payload: ActionIn,
     agent: Agent | None = Depends(optional_agent),
     db: AsyncSession = Depends(get_db),
+    x_play_token: str | None = Header(default=None, alias="X-Play-Token"),
 ):
-    seat = await _load_seat_for_caller(db, match_id, agent)
-    if seat is None:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error": "no_seat_for_bearer",
-                "message": "the bearer token does not own a seat in this match; "
-                           "did you POST /join first?",
-            },
-        )
+    play_token = x_play_token or payload.play_token
+    seat = await _require_seat(db, match_id, agent, play_token)
     # Anti-cheat (§7.1) — owner_id never acts directly; only the agent
     # they authenticated as may submit actions, and that's exactly what
     # `optional_agent` resolves. Owner-only sessions are read-only by design.
@@ -326,13 +367,9 @@ async def abort_endpoint(
     match_id: str,
     agent: Agent | None = Depends(optional_agent),
     db: AsyncSession = Depends(get_db),
+    x_play_token: str | None = Header(default=None, alias="X-Play-Token"),
 ):
-    seat = await _load_seat_for_caller(db, match_id, agent)
-    if seat is None:
-        raise HTTPException(status_code=401, detail={
-            "error": "no_seat_for_bearer",
-            "message": "abort requires you to be a participant",
-        })
+    seat = await _require_seat(db, match_id, agent, x_play_token)
     if seat != 0:
         raise HTTPException(status_code=403, detail={
             "error": "host_only",
@@ -359,13 +396,9 @@ async def resign_endpoint(
     match_id: str,
     agent: Agent | None = Depends(optional_agent),
     db: AsyncSession = Depends(get_db),
+    x_play_token: str | None = Header(default=None, alias="X-Play-Token"),
 ):
-    seat = await _load_seat_for_caller(db, match_id, agent)
-    if seat is None:
-        raise HTTPException(status_code=401, detail={
-            "error": "no_seat_for_bearer",
-            "message": "resign requires you to be a participant",
-        })
+    seat = await _require_seat(db, match_id, agent, x_play_token)
     try:
         latest_seq, summary = await match_service.submit_action(
             db, match_id, seat=seat, action_type="concede",

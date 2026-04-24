@@ -439,9 +439,36 @@ async def submit_action(
         raise MatchError(code, msg, status_code=status)
 
     latest_seq = await persist_delta(db, match, players, delta)
+    if match.status in ("finished", "aborted"):
+        await _bump_stats_on_terminal(db, match, players)
     await db.commit()
     event_bus.notify(match.id)
     return latest_seq, delta.summary
+
+
+async def _bump_stats_on_terminal(
+    db: AsyncSession, match: Match, players: list[MatchPlayer]
+) -> None:
+    """Apply wins/losses/aborts to Agent rows once a match enters a terminal."""
+    from app.services import agent_service
+    if match.status == "aborted":
+        all_aids = [p.agent_id for p in players if p.agent_id]
+        await agent_service.record_match_result(
+            db, winning_agent_ids=all_aids, losing_agent_ids=[], aborted=True,
+        )
+        return
+    if match.status != "finished":
+        return
+    result = match.result or {}
+    winning_seats = set(result.get("winning_seats") or [])
+    losing_seats = set(result.get("losing_seats") or [])
+    win_aids = [p.agent_id for p in players
+                if p.seat in winning_seats and p.agent_id]
+    lose_aids = [p.agent_id for p in players
+                 if p.seat in losing_seats and p.agent_id]
+    await agent_service.record_match_result(
+        db, winning_agent_ids=win_aids, losing_agent_ids=lose_aids,
+    )
 
 
 def _engine_error_to_http(code: str) -> int:
@@ -463,7 +490,7 @@ def _engine_error_to_http(code: str) -> int:
 
 
 async def abort_match(
-    db: AsyncSession, match_id: str, *, by_seat: int, reason: str = "host_cancelled"
+    db: AsyncSession, match_id: str, *, reason: str = "host_cancelled"
 ) -> int:
     match, players = await load_match(db, match_id)
     state = _state_from_orm(match, players)
@@ -472,6 +499,24 @@ async def abort_match(
         raise MatchError(delta.error.code, delta.error.message,
                          status_code=_engine_error_to_http(delta.error.code))
     latest_seq = await persist_delta(db, match, players, delta)
+    await _bump_stats_on_terminal(db, match, players)
+    await db.commit()
+    event_bus.notify(match.id)
+    return latest_seq
+
+
+async def force_timeout(db: AsyncSession, match_id: str) -> int:
+    """Engine timeout entry-point used by janitor when deadline_ts elapses."""
+    match, players = await load_match(db, match_id)
+    state = _state_from_orm(match, players)
+    delta = GameEngine.apply_timeout(state)
+    if not delta.accepted:
+        # Ignore "nothing to timeout" — caller won't bubble it up.
+        raise MatchError(delta.error.code, delta.error.message,
+                         status_code=_engine_error_to_http(delta.error.code))
+    latest_seq = await persist_delta(db, match, players, delta)
+    if match.status in ("finished", "aborted"):
+        await _bump_stats_on_terminal(db, match, players)
     await db.commit()
     event_bus.notify(match.id)
     return latest_seq

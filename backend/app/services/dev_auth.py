@@ -1,17 +1,14 @@
 """
-Dev-mode bearer-token auth stub used by 3C until real /api/agents lands in 3D.
+Bearer-token resolver.
 
-Header format:
-    Authorization: Bearer dev-<name>
-        → auto-upserts an Agent with name=<name>, no owner.
+Priority order:
+    1. Real api_key (`clv_<24 hex>`) → hashed-lookup against `agents` table.
+    2. dev-<name>  /  dev-owner-<owner>-as-<name>
+       — only when `settings.dev_auth_enabled = True`. Auto-upserts an
+       Agent[+Owner] for ad-hoc local testing. Disable in prod.
 
-    Authorization: Bearer dev-owner-<owner>-as-<name>
-        → upserts an Owner(external_user_id=<owner>) and an Agent
-          (name=<name>) claimed by that owner. Lets us exercise
-          player_owner / spectator views without the full SSO loop.
-
-In production (3D+) we drop this module and replace with hashed api_key
-lookup.
+Returns:
+    (Agent | None, owner_external_id_for_logging | None)
 """
 
 from __future__ import annotations
@@ -22,8 +19,10 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.agent import Agent
 from app.models.owner import Owner
+from app.services import agent_service
 
 
 def _stable_id(prefix: str, key: str) -> str:
@@ -85,20 +84,28 @@ async def parse_bearer(
         return None, None
     token = parts[1].strip()
 
-    # dev-owner-<owner>-as-<name>
-    if token.startswith("dev-owner-") and "-as-" in token:
-        rest = token[len("dev-owner-"):]
-        owner_id, _, name = rest.partition("-as-")
-        if owner_id and name:
-            agent = await upsert_dev_agent(db, name=name, owner_external_id=owner_id)
-            return agent, owner_id
-
-    # dev-<name>
-    if token.startswith("dev-") and not token.startswith("dev-owner-"):
-        name = token[len("dev-"):].strip()
-        if name:
-            agent = await upsert_dev_agent(db, name=name)
+    # 1) Real api_key first — production-grade path.
+    if token.startswith("clv_"):
+        agent = await agent_service.verify_api_key(db, token)
+        if agent is not None:
             return agent, None
 
-    # 3D will handle real api_keys here.
+    # 2) Dev stub paths (gated by dev_auth_enabled).
+    if get_settings().dev_auth_enabled:
+        # dev-owner-<owner>-as-<name>
+        if token.startswith("dev-owner-") and "-as-" in token:
+            rest = token[len("dev-owner-"):]
+            owner_id, _, name = rest.partition("-as-")
+            if owner_id and name:
+                agent = await upsert_dev_agent(db, name=name,
+                                               owner_external_id=owner_id)
+                return agent, owner_id
+
+        # dev-<name>
+        if token.startswith("dev-") and not token.startswith("dev-owner-"):
+            name = token[len("dev-"):].strip()
+            if name:
+                agent = await upsert_dev_agent(db, name=name)
+                return agent, None
+
     return None, None

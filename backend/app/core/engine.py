@@ -334,6 +334,55 @@ class GameEngine:
         # No public broadcast at all (consistent with D6 v2).
         return delta
 
+    # ── Timeout (called by janitor when deadline_ts elapses) ─────
+
+    @staticmethod
+    def apply_timeout(state: MatchState) -> Delta:
+        """Force the current phase to advance after deadline_ts elapses.
+
+        - speak_round_N: the current speaker is skipped (their `eliminated_*`
+          stays untouched; D8 punishment is left to product decision).
+        - vote_round_N: every alive player who hasn't voted is recorded as
+          abstain (last_vote_target_seat=None, has_voted_this_round=True),
+          then the round resolves normally.
+        """
+        if state.status != "in_progress":
+            return Delta.reject("match_not_in_progress",
+                                f"status is {state.status}")
+        kind, round_n = _expect_phase(state, "speak")
+        if kind == "speak":
+            current = state.current_speaker_seat
+            if current is None:
+                return Delta.reject("no_current_speaker", "nothing to time out")
+            delta = GameEngine.apply_skip(state, seat=current)
+            if delta.accepted:
+                delta.add_event("speech_timeout", VIS_PUBLIC,
+                                seat=current, round=round_n)
+            return delta
+
+        if kind == "vote":
+            delta = Delta()
+            # Mark every un-voted alive seat as abstain and emit a public note.
+            unvoted = [p.seat for p in state.alive() if not p.has_voted_this_round]
+            for s in unvoted:
+                delta.update_player(s, has_voted_this_round=True,
+                                    last_vote_target_seat=None)
+                p = state.by_seat(s)
+                if p is not None:
+                    p.has_voted_this_round = True
+                    p.last_vote_target_seat = None
+                delta.add_event("vote_timeout", VIS_PUBLIC,
+                                seat=s, round=round_n)
+            # Resolve the round now (note: there is no "last voter" — the
+            # janitor closed the round, so we feed dummy values that won't
+            # double-count anything because all has_voted flags are set).
+            return _merge(delta, _resolve_vote_round(state, round_n,
+                                                    last_voter_seat=-1,
+                                                    last_target_seat=-1))
+
+        return Delta.reject("nothing_to_timeout",
+                            f"phase {state.phase} has no timeout transition")
+
     # ── Lifecycle abort (host cancels waiting room) ──────────────
 
     @staticmethod

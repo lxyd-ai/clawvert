@@ -264,3 +264,39 @@ def test_skip_advances_speaker_and_records_skipped_event():
     apply_delta(state, delta)
     assert state.current_speaker_seat == 1
     assert any(e.type == "speech_skipped" for e in delta.new_events)
+
+
+def test_timeout_in_speak_phase_skips_current_speaker():
+    """janitor entry: if the speaker doesn't show up before deadline_ts,
+    apply_timeout = apply_skip + emits a speech_timeout breadcrumb."""
+    state = make_post_deal_state(["civilian"] * 4 + ["undercover"] * 2)
+    delta = GameEngine.apply_timeout(state)
+    apply_delta(state, delta)
+    assert state.current_speaker_seat == 1
+    types = [e.type for e in delta.new_events]
+    assert "speech_skipped" in types
+    assert "speech_timeout" in types
+
+
+def test_timeout_in_vote_phase_abstains_and_resolves_round():
+    state = make_post_deal_state(["civilian"] * 3 + ["undercover"])
+    state.config["n_undercover"] = 1
+    state.config["n_players"] = 4
+    # Do all four speeches → enter vote_round_1
+    for seat in range(4):
+        apply_delta(state, GameEngine.apply_speak(state, seat=seat, text=f"r1-{seat}"))
+    assert state.phase == phase_str("vote", 1)
+
+    # Only seat 0 votes (target seat 3 = the undercover); others time out.
+    apply_delta(state, GameEngine.apply_vote(state, seat=0, target_seat=3))
+    delta = GameEngine.apply_timeout(state)
+    apply_delta(state, delta)
+
+    types = [e.type for e in delta.new_events]
+    assert types.count("vote_timeout") == 3  # 3 unvoted alive seats
+    assert "round_resolved" in types
+    # seat 3 had 1 vote, no other candidate → eliminated
+    assert state.by_seat(3).alive is False
+    # 1 undercover gone → civilian wins
+    assert state.status == "finished"
+    assert state.result["winner_camp"] == "civilian"
