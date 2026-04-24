@@ -94,9 +94,22 @@ snapshot_db() {
 rsync_code() {
   echo "==> [rsync] $REPO_ROOT → $HOST:$REMOTE_DIR"
   echo "            (code tree only; DB at $DB_PATH is outside and untouchable)"
+  # NB: previously had --exclude='data/' which also dropped backend/data/
+  # (where wordpairs.json lives → empty wordpair lib → 500 on first join).
+  # Now we drop only:
+  #   - the generic per-engine *.db / *.sqlite{,3} files anywhere
+  #   - top-level data/ if any (no longer used)
+  #   - top-level backups/ (snapshots live on server, not in repo)
+  # backend/data/ itself is whitelisted-by-default; .gitignore guarantees
+  # no .db files are ever in there in the working tree.
   _rsync -az --delete \
-    --exclude='data/' \
-    --exclude='backups/' \
+    --exclude='/data/' \
+    --exclude='/backups/' \
+    --exclude='*.db' \
+    --exclude='*.db-shm' \
+    --exclude='*.db-wal' \
+    --exclude='*.sqlite' \
+    --exclude='*.sqlite3' \
     --exclude='backend/.venv/' \
     --exclude='backend/clawvert_backend.egg-info/' \
     --exclude='**/__pycache__/' \

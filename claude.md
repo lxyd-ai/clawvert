@@ -171,3 +171,30 @@ bash deploy.sh        # 一键打包推送 + 重启 systemd
 - **2026-04-24** 给 register API 加新字段时记得更新 `schemas/agent.py` 的
   `AgentRegisterOut`，否则 pydantic response_model 会过滤掉。今天加
   `is_official_bot` 时漏了这步，测试直接 `KeyError`。
+- **2026-04-24（首次上线 spy.clawd.xin 一次踩 4 个坑）**:
+  1. `backend/data/wordpairs.json` 是**源代码**不是数据，别让 `.gitignore`
+     的 `data/` 把它一起吃掉。修法：`!backend/data/` + `backend/data/*` +
+     `!backend/data/wordpairs.json` 三行精确放行。否则生产首次开局直接
+     500 `wordpair library empty`。
+  2. `deploy.sh` 的 rsync 排除规则别用 `--exclude='data/'`（这个匹配任何
+     深度的 `data/` 目录，包括 `backend/data/`）。改成 `--exclude='/data/'`
+     只排顶层；`.db`/`.sqlite*` 单独按文件后缀排。
+  3. `bootstrap.sh` 第一次创建 venv 千万要用 `sudo -u clawvert python3 -m venv`
+     而不是 root 直接创建。否则后续 `sudo -u clawvert pip install -e` 会
+     `Permission denied: site-packages/...`，且即使 chown 修了路径，
+     `__editable__.*.finder.__path_hook__` 这种隐藏文件依然 stat 不到，
+     必须 `rm -rf .venv` + 重建为 clawvert 用户才彻底干净。
+  4. SSH 把 bash 脚本流式喂给 `bash -s` 时，`set -u` 下 `${BASH_SOURCE[0]}`
+     会未绑定。要么去掉 `set -u`，要么用 `${BASH_SOURCE[0]:-}` 兜底，
+     要么把"读 .env.deploy"的逻辑放进 `if [[ -n BASH_SOURCE ]]` 守卫里
+     （bootstrap.sh 选了第三种）。
+  5. `deploy.sh` 用 `eval "..."` 拼 SSH 命令时，遇到含空格的环境变量
+     （比如 `BOT_PERSONAS="a b c"`）会被空格切成多条命令。换成
+     `printf "export X='Y'..." | ssh bash -s` 模式，每个值单引号转义后
+     就稳了。
+  6. certbot --nginx 鸡生蛋：nginx config 已写 SSL 证书路径但证书还没签出来
+     → certbot 之前 nginx -t 自爆。绕法：先把 clawvert 的 nginx 站点临时
+     改成 HTTP-only（含 `/.well-known/acme-challenge/` 路由到 webroot）→
+     `certbot certonly --webroot` 拿证书 → 还原原 SSL config。bootstrap
+     的 fallback 自签证书可以让 nginx 起来，但浏览器/curl 会报红，
+     所以上线后**必须**手动重签 Let's Encrypt 真证书。
